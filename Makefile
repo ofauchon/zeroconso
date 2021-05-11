@@ -2,6 +2,8 @@ TINYGO=~/go/bin/tinygo
 BM_DEV=/dev/ttyACM0
 OUT=zeroconso.elf
 SRC=zeroconso.go
+#OUT=timers.elf
+#SRC=timers.go
 
 BOARD=bluepill
 SPEED=9600
