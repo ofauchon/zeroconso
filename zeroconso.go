@@ -4,80 +4,51 @@ import (
 	"machine"
 	"time"
 
+	"./core"
+	"./drivers"
+
 	"tinygo.org/x/drivers/hd44780i2c"
 )
 
-const (
-	DISPLAY_NUM_COLS  = 20
-	DISPLAY_NUM_LINES = 4
-
-	SCREEN_SPLASH = 0
-	SCREEN_INFO   = iota
-	SCREEN_CALIB  = iota
-
-	KEY_UP        = 0
-	KEY_DOWN      = iota
-	KEY_LEFT      = iota
-	KEY_RIGHT     = iota
-	KEY_SHORT     = iota
-	KEY_LONGPRESS = iota
-)
-
-type MetricsData struct {
-	AcVoltage1 uint32 // AC Voltage Line 1
-	AcCurrent1 uint32 // AC Current Line 1
-	AcVoltage2 uint32 // AC Voltage Line 2
-	AcCurrent2 uint32 // AC Current Line 2
-}
-
-type ConfigData struct {
-	AcVoltage1Calib uint16 // Calibration for AC Voltage Line 1
-	AcCurrentCalib  uint16 // Calibration for AC Current Line 1
-	AcVoltageCalib  uint16 // Calibration for AC Voltage Line 2
-	AcCurrent2Calib uint16 // Calibration for AC Current Line 2
-}
+const ()
 
 var (
-	lcd     hd44780i2c.Device
-	metrics MetricsData
-	config  ConfigData
+	rt *core.RuntimeData
 )
-
-//var buffer [DISPLAY_NUM_COLS * DISPLAY_NUM_LINES]byte
 
 //  --------- HW INIT
 
 func hwInit() {
 
+	rt.SerialConsole = &machine.UART0
 	// I2C and LCD
 	machine.I2C0.Configure(machine.I2CConfig{
 		Frequency: machine.TWI_FREQ_400KHZ,
 	})
-	lcd = hd44780i2c.New(machine.I2C0, 0x27) // some modules have address 0x3F
-	lcd.Configure(hd44780i2c.Config{
+	driver := hd44780i2c.New(machine.I2C0, 0x27) // some modules have address 0x3F
+	rt.Lcd = &driver
+	rt.Lcd.Configure(hd44780i2c.Config{
 		Width:       20, // required
 		Height:      4,  // required
-		CursorOn:    true,
-		CursorBlink: true,
+		CursorOn:    false,
+		CursorBlink: false,
 	})
-}
-
-// ---------- LCD
-
-func DisplayScreen(screen int, cnf ConfigData, rt MetricsData) {
-	lcd.SetCursor(0, 0)
-	switch screen {
-	case SCREEN_SPLASH:
-		lcd.Print([]byte("Zero Conso V1"))
-	case SCREEN_CALIB:
-		lcd.Print([]byte("Calibration"))
-	case SCREEN_INFO:
-		lcd.Print([]byte("Info"))
-	}
 }
 
 // ---------- Key
 func handleKeyboard(key byte) {
+	println("key:", key)
+
+}
+
+func readSerial() {
+	for {
+		if rt.SerialConsole.Buffered() > 0 {
+			data, _ := rt.SerialConsole.ReadByte()
+			handleKeyboard(data)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 }
 
@@ -85,24 +56,60 @@ func handleKeyboard(key byte) {
 
 func main() {
 
+	rt = &core.RuntimeData{}
+	rt.Metrics = &core.MetricsData{}
 	println("Hello TinyGo")
 
 	hwInit()
+	rt.Lcd.SetCursor(0, 0)
+	rt.Lcd.Print([]byte("HELLO"))
+
+	go readSerial()
 
 	// Blink led
 	led := machine.LED
 	led.Configure(machine.PinConfig{Mode: machine.PinOutput})
+
+	drivers.AdcInit()
+
 	for i := 0; i < 5; i++ {
 		led.Low()
 		time.Sleep(time.Millisecond * 100)
 		led.High()
 		time.Sleep(time.Millisecond * 100)
 	}
-	println("2")
 
-	lcd.SetCursor(0, 0)
-	lcd.Print([]byte("TinyGO"))
+	display := core.NewDisplayManager(rt)
+	display.ScreenInfos(true)
 
-	//DisplayScreen(SCREEN_SPLASH, config, metrics)
+	for {
+
+		// Read U1
+		drivers.AdcSetChannel(0)
+		vms := drivers.AcAmplitudeMv()
+		ima := (30000 * vms) / 1000
+		rt.Metrics.AcVoltageMv = ima
+
+		// Read I1
+		drivers.AdcSetChannel(1)
+		vms = drivers.AcAmplitudeMv()
+		ima = (30000 * vms) / 1000
+		rt.Metrics.AcCurrent1Ma = ima
+
+		// Read I2
+		drivers.AdcSetChannel(2)
+		vms = drivers.AcAmplitudeMv()
+		ima = (30000 * vms) / 1000
+		rt.Metrics.AcCurrent2Ma = ima
+
+		// Read I3
+		drivers.AdcSetChannel(3)
+		vms = drivers.AcAmplitudeMv()
+		ima = (30000 * vms) / 1000
+		rt.Metrics.AcCurrent3Ma = ima
+
+		display.ScreenInfos(false)
+		time.Sleep(time.Second * 5)
+	}
 
 }
